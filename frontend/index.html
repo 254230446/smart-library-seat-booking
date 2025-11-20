@@ -82,7 +82,29 @@
             <template #footer>
                 <el-button @click="showLogin = false">取消</el-button>
                 <el-button type="primary" @click="login">登录</el-button>
-                <el-button @click="showRegister = true">注册</el-button>
+                <el-button @click="showLogin = false; showRegister = true">注册</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 注册对话框 -->
+        <el-dialog v-model="showRegister" title="用户注册" width="400px">
+            <el-form :model="registerForm">
+                <el-form-item label="用户名">
+                    <el-input v-model="registerForm.username" placeholder="请输入用户名"></el-input>
+                </el-form-item>
+                <el-form-item label="密码">
+                    <el-input v-model="registerForm.password" type="password" placeholder="请输入密码"></el-input>
+                </el-form-item>
+                <el-form-item label="确认密码">
+                    <el-input v-model="registerForm.confirmPassword" type="password" placeholder="请再次输入密码"></el-input>
+                </el-form-item>
+                <el-form-item label="邮箱">
+                    <el-input v-model="registerForm.email" placeholder="请输入邮箱（可选）"></el-input>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="showRegister = false">取消</el-button>
+                <el-button type="primary" @click="register">注册</el-button>
             </template>
         </el-dialog>
 
@@ -177,11 +199,11 @@
                     <el-table-column prop="status" label="状态"></el-table-column>
                     <el-table-column label="操作">
                         <template #default="scope">
-                            <el-button v-if="scope.row.status === 'active' && !scope.row.check_in" 
+                            <el-button v-if="scope.row.status === 'active' && !scope.row.check_in"
                                       size="small" @click="checkIn(scope.row.id)">签到</el-button>
-                            <el-button v-if="scope.row.status === 'active'" 
+                            <el-button v-if="scope.row.status === 'active'"
                                       size="small" type="danger" @click="cancelBooking(scope.row.id)">取消</el-button>
-                            <el-button v-if="scope.row.status === 'active' && scope.row.check_in" 
+                            <el-button v-if="scope.row.status === 'active' && scope.row.check_in"
                                       size="small" type="success" @click="rateBooking(scope.row.id)">评价</el-button>
                         </template>
                     </el-table-column>
@@ -194,7 +216,7 @@
                     <h3>📊 今日占用率统计</h3>
                     <div id="occupancyChart" style="height: 400px;"></div>
                 </div>
-                
+
                 <div class="chart-container">
                     <h3>🔥 热门座位Top10</h3>
                     <div id="popularChart" style="height: 400px;"></div>
@@ -212,6 +234,12 @@
                     showLogin: false,
                     showRegister: false,
                     loginForm: { username: '', password: '' },
+                    registerForm: {
+                        username: '',
+                        password: '',
+                        confirmPassword: '',
+                        email: ''
+                    },
                     activeTab: 'seats',
                     seats: [],
                     filterFloor: null,
@@ -226,7 +254,6 @@
                 }
             },
             mounted() {
-                // 检查登录状态
                 const user = localStorage.getItem('currentUser');
                 if (user) {
                     this.currentUser = JSON.parse(user);
@@ -235,6 +262,39 @@
                 }
             },
             methods: {
+                async register() {
+                    if (!this.registerForm.username || !this.registerForm.password) {
+                        ElementPlus.ElMessage.error('请填写用户名和密码');
+                        return;
+                    }
+
+                    if (this.registerForm.password !== this.registerForm.confirmPassword) {
+                        ElementPlus.ElMessage.error('两次密码不一致');
+                        return;
+                    }
+
+                    try {
+                        const res = await axios.post('http://localhost:5000/api/register', {
+                            username: this.registerForm.username,
+                            password: this.registerForm.password,
+                            email: this.registerForm.email
+                        });
+
+                        ElementPlus.ElMessage.success('注册成功！请登录');
+                        this.showRegister = false;
+                        this.showLogin = true;
+
+                        this.registerForm = {
+                            username: '',
+                            password: '',
+                            confirmPassword: '',
+                            email: ''
+                        };
+                    } catch (error) {
+                        ElementPlus.ElMessage.error('注册失败：' + (error.response?.data?.error || '网络错误'));
+                    }
+                },
+
                 async login() {
                     try {
                         const res = await axios.post('http://localhost:5000/api/login', this.loginForm);
@@ -244,34 +304,45 @@
                         this.loadSeats();
                         ElementPlus.ElMessage.success('登录成功！');
                     } catch (error) {
-                        ElementPlus.ElMessage.error('登录失败：' + error.response.data.error);
+                        ElementPlus.ElMessage.error('登录失败：' + (error.response?.data?.error || '网络错误'));
                     }
                 },
-                
+
                 async loadSeats() {
                     const params = {};
                     if (this.filterFloor) params.floor = this.filterFloor;
                     if (this.filterArea) params.area = this.filterArea;
-                    
+
                     const res = await axios.get('http://localhost:5000/api/seats', { params });
                     this.seats = res.data;
                 },
-                
-                async getRecommendations() {
-                    const res = await axios.post('http://localhost:5000/api/recommend', {
-                        user_id: this.currentUser.id,
-                        filters: this.preferences,
-                        n: 5
-                    });
-                    this.recommendations = res.data;
-                    ElementPlus.ElMessage.success('已为您生成个性化推荐！');
+
+                selectSeat(seat) {
+                    if (seat.status !== 'available') {
+                        ElementPlus.ElMessage.warning('该座位不可用');
+                        return;
+                    }
+                    this.bookSeat(seat.id);
                 },
-                
+
+                async getRecommendations() {
+                    try {
+                        const res = await axios.post('http://localhost:5000/api/recommend', {
+                            user_id: this.currentUser.id,
+                            filters: this.preferences,
+                            n: 5
+                        });
+                        this.recommendations = res.data;
+                        ElementPlus.ElMessage.success('已为您生成个性化推荐！');
+                    } catch (error) {
+                        ElementPlus.ElMessage.error('获取推荐失败');
+                    }
+                },
+
                 async bookSeat(seatId) {
-                    // 简化版：预约2小时
                     const start = new Date();
                     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
-                    
+
                     try {
                         await axios.post('http://localhost:5000/api/bookings', {
                             user_id: this.currentUser.id,
@@ -281,45 +352,46 @@
                         });
                         ElementPlus.ElMessage.success('预约成功！');
                         this.loadMyBookings();
+                        this.loadSeats();
                     } catch (error) {
-                        ElementPlus.ElMessage.error('预约失败：' + error.response.data.error);
+                        ElementPlus.ElMessage.error('预约失败：' + (error.response?.data?.error || '网络错误'));
                     }
                 },
-                
+
                 async loadMyBookings() {
                     const res = await axios.get(`http://localhost:5000/api/bookings/${this.currentUser.id}`);
                     this.myBookings = res.data;
                 },
-                
+
                 async cancelBooking(bookingId) {
                     await axios.post(`http://localhost:5000/api/bookings/${bookingId}/cancel`);
                     ElementPlus.ElMessage.success('已取消预约');
                     this.loadMyBookings();
                 },
-                
+
                 async checkIn(bookingId) {
                     await axios.post(`http://localhost:5000/api/bookings/${bookingId}/checkin`);
                     ElementPlus.ElMessage.success('签到成功！');
                     this.loadMyBookings();
                 },
-                
+
                 async rateBooking(bookingId) {
                     const rating = await ElementPlus.ElMessageBox.prompt('请为座位打分 (1-5)', '评价', {
                         inputPattern: /^[1-5]$/,
                         inputErrorMessage: '请输入1-5的数字'
                     });
-                    
+
                     await axios.post(`http://localhost:5000/api/bookings/${bookingId}/rate`, {
                         rating: parseInt(rating.value)
                     });
                     ElementPlus.ElMessage.success('评价成功！');
                     this.loadMyBookings();
                 },
-                
+
                 async loadOccupancyChart() {
                     const res = await axios.get('http://localhost:5000/api/analytics/occupancy');
                     const data = res.data;
-                    
+
                     const chart = echarts.init(document.getElementById('occupancyChart'));
                     chart.setOption({
                         xAxis: {
@@ -338,11 +410,11 @@
                         }]
                     });
                 },
-                
+
                 async loadPopularChart() {
                     const res = await axios.get('http://localhost:5000/api/analytics/popular-seats');
                     const data = res.data;
-                    
+
                     const chart = echarts.init(document.getElementById('popularChart'));
                     chart.setOption({
                         xAxis: {
@@ -371,7 +443,7 @@
                 }
             }
         });
-        
+
         app.use(ElementPlus);
         app.mount('#app');
     </script>
