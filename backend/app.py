@@ -144,31 +144,47 @@ def recommend_seats():
 # ============ 预约管理 ============
 
 @app.route('/api/bookings', methods=['POST'])
+@app.route('/api/bookings', methods=['POST'])
 def create_booking():
     """创建预约"""
     data = request.json
-    
+
+    print("收到预约请求:", data)  # 调试信息
+
+    # 解析时间（兼容多种格式）
+    try:
+        start_str = data['start_time'].replace('Z', '').replace('+00:00', '')[:19]
+        end_str = data['end_time'].replace('Z', '').replace('+00:00', '')[:19]
+        start_time = datetime.strptime(start_str, '%Y-%m-%dT%H:%M:%S')
+        end_time = datetime.strptime(end_str, '%Y-%m-%dT%H:%M:%S')
+    except Exception as e:
+        print("时间解析错误:", e)
+        return jsonify({'error': '时间格式错误'}), 400
+
     # 检查时间冲突
     conflicts = Booking.query.filter(
         Booking.seat_id == data['seat_id'],
-        Booking.start_time < datetime.fromisoformat(data['end_time']),
-        Booking.end_time > datetime.fromisoformat(data['start_time']),
+        Booking.start_time < end_time,
+        Booking.end_time > start_time,
         Booking.status == 'active'
     ).first()
-    
+
     if conflicts:
         return jsonify({'error': '该时间段已被预约'}), 400
-    
+
+    # 创建预约
     booking = Booking(
         user_id=data['user_id'],
         seat_id=data['seat_id'],
-        start_time=datetime.fromisoformat(data['start_time']),
-        end_time=datetime.fromisoformat(data['end_time'])
+        start_time=start_time,
+        end_time=end_time
     )
-    
+
     db.session.add(booking)
     db.session.commit()
-    
+
+    print(f"预约成功: 用户{data['user_id']} 座位{data['seat_id']}")  # 调试信息
+
     return jsonify({
         'message': '预约成功',
         'booking_id': booking.id
